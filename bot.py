@@ -281,6 +281,12 @@ def main():
             # Extract metadata from code
             namespace: dict = {}
             exec(compile(code, f"<skill:{name}>", "exec"), {"__builtins__": {}}, namespace)  # noqa: S102
+            code_name = namespace.get("SKILL_NAME")
+            if code_name and code_name != name:
+                await interaction.followup.send(
+                    f"名稱不一致：指令參數為 `{name}`，但程式碼中 SKILL_NAME 為 `{code_name}`。"
+                )
+                return
             metadata = SkillMetadata(
                 name=name,
                 description=namespace.get("SKILL_DESCRIPTION", ""),
