@@ -273,6 +273,7 @@ class MemoryEngine:
                 continue
 
             all_ids.append(entry.id)
+            # Convention: first tag is the primary topic for grouping
             topic_key = entry.tags[0] if entry.tags else "general"
             facts_by_topic.setdefault(topic_key, []).append(data)
 

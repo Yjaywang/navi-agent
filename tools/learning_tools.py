@@ -58,7 +58,7 @@ async def record_feedback(args: dict[str, Any]) -> dict[str, Any]:
         turn_index=args.get("turn_index", -1),
         summary=f"{feedback_type} feedback: {args.get('original_query', '')[:80]}",
         tags=["feedback", feedback_type],
-        source_user="discord_reaction",
+        source_user="agent_initiated",
     )
 
     path = engine.store_feedback(feedback)
@@ -74,7 +74,7 @@ async def record_feedback(args: dict[str, Any]) -> dict[str, Any]:
 async def consolidate_knowledge(args: dict[str, Any]) -> dict[str, Any]:
     engine = _get_engine()
     topic = args.get("topic", "") or None
-    date_range_days = args.get("date_range_days", 7) or 7
+    date_range_days = args.get("date_range_days", 7)
 
     result = engine.consolidate_knowledge(topic, date_range_days)
     groups = result["groups"]

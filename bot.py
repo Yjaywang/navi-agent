@@ -233,12 +233,12 @@ def main():
         # Find the preceding user message (original query)
         original_query = ""
         try:
-            async for msg in channel.history(limit=5, before=message, oldest_first=False):
+            async for msg in channel.history(limit=20, before=message, oldest_first=False):
                 if msg.author.id != client.user.id:
                     original_query = msg.content
                     break
         except discord.HTTPException:
-            pass
+            log.warning("Failed to fetch message history for feedback in channel %s", payload.channel_id)
 
         try:
             engine = agent._get_engine()
