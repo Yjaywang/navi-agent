@@ -1,0 +1,19 @@
+[project]
+name = "navi-agent"
+version = "0.1.0"
+description = "Discord-based Claude agent with GitHub memory and self-learning"
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk",
+    "discord.py>=2.3",
+    "python-dotenv",
+    "PyGithub>=2.1",
+    "pydantic>=2.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
