@@ -469,6 +469,7 @@ def main():
             writer.write(resp)
             await writer.drain()
             writer.close()
+            await writer.wait_closed()
 
         port = config.health_check_port
         _health_server = await asyncio.start_server(_handle, "0.0.0.0", port)
