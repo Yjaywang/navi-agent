@@ -14,10 +14,14 @@ from discord import app_commands
 
 import uuid
 
+from datetime import datetime, timezone
+
 import agent
 from config import load_config
-from memory.models import FeedbackMemory
+from memory.models import FeedbackMemory, UserProfile
 from sessions.manager import SessionManager
+from skills.base import SkillMetadata
+from skills.loader import validate_skill_code, save_skill_to_github
 from utils.chunking import chunk_text
 from utils.rate_limiter import RateLimiter
 from utils.permissions import Role, get_user_role, require_role
@@ -201,6 +205,221 @@ def main():
         except Exception:
             log.exception("Failed to forget memories about %s", topic)
             await interaction.followup.send("刪除記憶失敗。")
+
+    @tree.command(name="ask", description="單次問答")
+    @app_commands.describe(question="你想問的問題")
+    async def cmd_ask(interaction: discord.Interaction, question: str):
+        await interaction.response.defer()
+        user_id = str(interaction.user.id)
+        guild_id = str(interaction.guild_id) if interaction.guild_id else ""
+        try:
+            async with asyncio.timeout(config.agent_query_timeout):
+                response_text, response_files = await agent.run_query(
+                    question, user_id=user_id, guild_id=guild_id,
+                )
+            chunks = chunk_text(response_text)
+            discord_files = [
+                discord.File(io.BytesIO(f["data"]), filename=f["filename"])
+                for f in response_files
+            ]
+            # Send first chunk as followup, then create thread for the rest
+            first_msg = await interaction.followup.send(chunks[0], wait=True)
+            if len(chunks) > 1 and not isinstance(interaction.channel, discord.DMChannel):
+                try:
+                    thread = await first_msg.create_thread(
+                        name=f"Ask: {question[:50]}",
+                        auto_archive_duration=60,
+                    )
+                    for i, part in enumerate(chunks[1:]):
+                        is_last = i == len(chunks) - 2
+                        if is_last and discord_files:
+                            await thread.send(part, files=discord_files)
+                        else:
+                            await thread.send(part)
+                except discord.HTTPException:
+                    for part in chunks[1:]:
+                        await interaction.followup.send(part)
+            elif discord_files:
+                await interaction.followup.send(files=discord_files)
+        except TimeoutError:
+            await interaction.followup.send("回答超時，請稍後再試。")
+        except Exception:
+            log.exception("Ask command failed")
+            await interaction.followup.send("回答失敗。")
+
+    @tree.command(name="chat", description="開始持續對話 thread")
+    async def cmd_chat(interaction: discord.Interaction):
+        if isinstance(interaction.channel, discord.DMChannel):
+            await interaction.response.send_message("DM 中不需要建立對話串，直接發訊息即可！")
+            return
+        await interaction.response.defer()
+        display_name = interaction.user.display_name
+        try:
+            msg = await interaction.followup.send(
+                f"已為 {display_name} 建立新的對話串！請在這裡繼續對話。", wait=True,
+            )
+            await msg.create_thread(
+                name=f"Chat with {display_name}",
+                auto_archive_duration=60,
+            )
+        except Exception:
+            log.exception("Chat command failed")
+            await interaction.followup.send("建立對話串失敗。")
+
+    @tree.command(name="skill_add", description="新增自訂技能 (Trusted)")
+    @app_commands.describe(name="技能名稱", code="技能的 Python 程式碼")
+    @require_role(Role.TRUSTED, config.admin_role_ids, config.trusted_role_ids)
+    async def cmd_skill_add(interaction: discord.Interaction, name: str, code: str):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            errors = validate_skill_code(code)
+            if errors:
+                await interaction.followup.send(
+                    "技能驗證失敗:\n" + "\n".join(f"- {e}" for e in errors)
+                )
+                return
+            # Extract metadata from code
+            namespace: dict = {}
+            exec(compile(code, f"<skill:{name}>", "exec"), {"__builtins__": {}}, namespace)  # noqa: S102
+            code_name = namespace.get("SKILL_NAME")
+            if code_name and code_name != name:
+                await interaction.followup.send(
+                    f"名稱不一致：指令參數為 `{name}`，但程式碼中 SKILL_NAME 為 `{code_name}`。"
+                )
+                return
+            metadata = SkillMetadata(
+                name=name,
+                description=namespace.get("SKILL_DESCRIPTION", ""),
+                version=namespace.get("SKILL_VERSION", "1.0.0"),
+                parameters={
+                    k: v.__name__ if isinstance(v, type) else str(v)
+                    for k, v in namespace.get("SKILL_PARAMETERS", {}).items()
+                },
+                source="user",
+                enabled=True,
+                installed_at=datetime.now(timezone.utc),
+                installed_by=str(interaction.user.id),
+                path=f"skills/installed/{name}.py",
+            )
+            registry = agent.get_skill_registry()
+            save_skill_to_github(registry.store, metadata, code)
+            registry.register_skill(metadata, code)
+            await interaction.followup.send(f"技能 `{name}` 已安裝並啟用。")
+        except Exception:
+            log.exception("Failed to add skill %s", name)
+            await interaction.followup.send("新增技能失敗。")
+
+    @tree.command(name="skill_list", description="列出已安裝的技能")
+    async def cmd_skill_list(interaction: discord.Interaction):
+        registry = agent.get_skill_registry()
+        skills = registry.get_skill_list()
+        if not skills:
+            await interaction.response.send_message("目前沒有已安裝的技能。")
+            return
+        embed = discord.Embed(title="已安裝技能", color=0x5865F2)
+        for s in skills:
+            status = "✅ 啟用" if s.enabled else "⬜ 停用"
+            embed.add_field(
+                name=f"{s.name} v{s.version} [{status}]",
+                value=s.description[:100] or "(無描述)",
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed)
+
+    @tree.command(name="memory_search", description="搜尋 agent 記憶 (Trusted)")
+    @app_commands.describe(query="搜尋關鍵字")
+    @require_role(Role.TRUSTED, config.admin_role_ids, config.trusted_role_ids)
+    async def cmd_memory_search(interaction: discord.Interaction, query: str):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            engine = agent.get_engine()
+            results = engine.indexer.search(query, top_k=10)
+            if not results:
+                await interaction.followup.send(f"找不到與 `{query}` 相關的記憶。")
+                return
+            lines = []
+            for i, entry in enumerate(results, 1):
+                date_str = entry.updated_at.strftime("%Y-%m-%d")
+                lines.append(f"{i}. [{entry.type}] {entry.summary} ({date_str})")
+            text = "\n".join(lines)
+            for part in chunk_text(text):
+                await interaction.followup.send(part)
+        except Exception:
+            log.exception("Memory search failed")
+            await interaction.followup.send("搜尋記憶失敗。")
+
+    @tree.command(name="profile_set", description="設定你的使用者偏好")
+    @app_commands.describe(key="設定項目", value="設定值")
+    @app_commands.choices(key=[
+        app_commands.Choice(name="display_name", value="display_name"),
+        app_commands.Choice(name="preferred_language", value="preferred_language"),
+        app_commands.Choice(name="notes", value="notes"),
+    ])
+    async def cmd_profile_set(
+        interaction: discord.Interaction,
+        key: app_commands.Choice[str],
+        value: str,
+    ):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            user_id = str(interaction.user.id)
+            engine = agent.get_engine()
+            profile = engine.get_user_profile(user_id)
+            if profile is None:
+                profile = UserProfile(
+                    user_id=user_id,
+                    display_name=interaction.user.display_name,
+                )
+            k = key.value
+            if k == "display_name":
+                profile.display_name = value
+            elif k == "preferred_language":
+                profile.preferred_language = value
+            elif k == "notes":
+                if len(value) > 500:
+                    await interaction.followup.send("筆記內容過長，請限制在 500 字元以內。")
+                    return
+                if len(profile.notes) >= 20:
+                    await interaction.followup.send("筆記數量已達上限（20則）。")
+                    return
+                profile.notes.append(value)
+            profile.last_seen = datetime.now(timezone.utc)
+            engine.update_user_profile(profile)
+            await interaction.followup.send(f"已更新 `{k}` 為 `{value}`。")
+        except Exception:
+            log.exception("Profile set failed")
+            await interaction.followup.send("設定失敗。")
+
+    @tree.command(name="profile_show", description="顯示你的個人資料")
+    async def cmd_profile_show(interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        engine = agent.get_engine()
+        profile = engine.get_user_profile(user_id)
+        if profile is None:
+            await interaction.response.send_message(
+                "你還沒有設定個人資料。使用 `/profile_set` 來設定。", ephemeral=True,
+            )
+            return
+        embed = discord.Embed(
+            title=f"{profile.display_name or interaction.user.display_name} 的個人資料",
+            color=0x5865F2,
+        )
+        embed.add_field(name="Display Name", value=profile.display_name or "(未設定)")
+        embed.add_field(
+            name="Preferred Language", value=profile.preferred_language or "(未設定)",
+        )
+        notes_text = "\n".join(profile.notes) if profile.notes else "(無)"
+        if len(notes_text) > 1024:
+            notes_text = notes_text[:1020] + "..."
+        embed.add_field(
+            name="Notes",
+            value=notes_text,
+            inline=False,
+        )
+        embed.add_field(
+            name="First Seen", value=profile.first_seen.strftime("%Y-%m-%d %H:%M UTC"),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @tree.error
     async def on_app_command_error(

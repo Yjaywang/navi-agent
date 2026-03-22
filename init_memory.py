@@ -11,6 +11,7 @@ import sys
 
 from config import load_config
 from memory.github_store import GitHubStore
+from skills.loader import install_builtins
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -57,6 +58,22 @@ def main() -> None:
 
     # Now the branch exists — commit remaining files atomically
     store.atomic_commit(files, "Add initial memory structure")
+
+    # Initialize skills registry
+    skills_registry = json.dumps({"version": 0, "skills": []}, indent=2)
+    store.create_or_update_file(
+        "skills/registry.json", skills_registry, "Add skills registry",
+    )
+
+    # Install builtin skills (summarize, translate)
+    installed = install_builtins(store)
+    if installed:
+        log.info(
+            "Installed %d builtin skill(s): %s",
+            len(installed),
+            ", ".join(m.name for m, _ in installed),
+        )
+
     log.info("Memory repo initialized successfully!")
 
 
