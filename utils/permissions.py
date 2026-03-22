@@ -28,8 +28,8 @@ def get_user_role(
         if trusted_role_ids & member_role_ids:
             return Role.TRUSTED
         return Role.EVERYONE
-    # DM users (plain discord.User) get TRUSTED — not ADMIN to prevent escalation
-    return Role.TRUSTED
+    # DM users (plain discord.User) get EVERYONE — least privilege
+    return Role.EVERYONE
 
 
 def require_role(

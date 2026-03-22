@@ -174,16 +174,17 @@ def main():
     @app_commands.describe(name="要移除的技能名稱")
     @require_role(Role.ADMIN, config.admin_role_ids, config.trusted_role_ids)
     async def cmd_skill_remove(interaction: discord.Interaction, name: str):
+        await interaction.response.defer(ephemeral=True)
         try:
-            registry = agent._get_skill_registry()
+            registry = agent.get_skill_registry()
             if not registry.get_skill(name):
-                await interaction.response.send_message(f"找不到技能 `{name}`。", ephemeral=True)
+                await interaction.followup.send(f"找不到技能 `{name}`。")
                 return
             registry.unregister_skill(name)
-            await interaction.response.send_message(f"技能 `{name}` 已移除。")
+            await interaction.followup.send(f"技能 `{name}` 已移除。")
         except Exception:
             log.exception("Failed to remove skill %s", name)
-            await interaction.response.send_message("移除技能失敗。", ephemeral=True)
+            await interaction.followup.send("移除技能失敗。")
 
     @tree.command(name="memory_forget", description="刪除特定主題的記憶 (Admin)")
     @app_commands.describe(topic="要遺忘的主題關鍵字")
@@ -191,7 +192,7 @@ def main():
     async def cmd_memory_forget(interaction: discord.Interaction, topic: str):
         await interaction.response.defer(ephemeral=True)
         try:
-            engine = agent._get_engine()
+            engine = agent.get_engine()
             count = engine.forget_topic(topic)
             if count == 0:
                 await interaction.followup.send(f"找不到與 `{topic}` 相關的記憶。")
@@ -398,7 +399,7 @@ def main():
             log.warning("Failed to fetch message history for feedback in channel %s", payload.channel_id)
 
         try:
-            engine = agent._get_engine()
+            engine = agent.get_engine()
             feedback = FeedbackMemory(
                 id=uuid.uuid4().hex[:12],
                 feedback_type=feedback_type,
