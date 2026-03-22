@@ -9,8 +9,11 @@ import io
 
 import discord
 
+import uuid
+
 import agent
 from config import load_config
+from memory.models import FeedbackMemory
 from sessions.manager import SessionManager
 from utils.chunking import chunk_text
 
@@ -89,6 +92,7 @@ def main():
 
     intents = discord.Intents.default()
     intents.message_content = True
+    intents.reactions = True
     client = discord.Client(intents=intents)
 
     @client.event
@@ -194,6 +198,70 @@ def main():
 
         # Opportunistic cleanup of expired sessions
         session_manager.cleanup_expired()
+
+    _FEEDBACK_EMOJIS = {"👍": "positive", "👎": "negative", "🔖": "bookmark"}
+
+    @client.event
+    async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+        # Ignore bot's own reactions
+        if payload.user_id == client.user.id:
+            return
+
+        emoji = str(payload.emoji)
+        if emoji not in _FEEDBACK_EMOJIS:
+            return
+
+        feedback_type = _FEEDBACK_EMOJIS[emoji]
+
+        # Fetch the channel and message
+        channel = client.get_channel(payload.channel_id)
+        if channel is None:
+            try:
+                channel = await client.fetch_channel(payload.channel_id)
+            except discord.HTTPException:
+                return
+
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except discord.HTTPException:
+            return
+
+        # Only process reactions on the bot's own messages
+        if message.author.id != client.user.id:
+            return
+
+        # Find the preceding user message (original query)
+        original_query = ""
+        try:
+            async for msg in channel.history(limit=20, before=message, oldest_first=False):
+                if msg.author.id != client.user.id:
+                    original_query = msg.content
+                    break
+        except discord.HTTPException:
+            log.warning("Failed to fetch message history for feedback in channel %s", payload.channel_id)
+
+        try:
+            engine = agent._get_engine()
+            feedback = FeedbackMemory(
+                id=uuid.uuid4().hex[:12],
+                feedback_type=feedback_type,
+                original_query=original_query[:500],
+                original_response=message.content[:500],
+                correction="",
+                conversation_id=str(payload.channel_id),
+                turn_index=-1,
+                message_id=str(payload.message_id),
+                summary=f"{feedback_type} feedback: {original_query[:80]}",
+                tags=["feedback", feedback_type],
+                source_user=str(payload.user_id),
+            )
+            engine.store_feedback(feedback)
+            log.info(
+                "Recorded %s feedback from user %s on message %s",
+                feedback_type, payload.user_id, payload.message_id,
+            )
+        except Exception:
+            log.exception("Failed to record feedback")
 
     client.run(config.discord_token, log_handler=None)
 

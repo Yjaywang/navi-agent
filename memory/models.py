@@ -35,6 +35,18 @@ class FactMemory(MemoryEntry):
     confidence: float = 1.0
     source_conversation: str = ""
     contradicts: list[str] = []
+    consolidated: bool = False
+
+
+class FeedbackMemory(MemoryEntry):
+    type: Literal["feedback"] = "feedback"
+    feedback_type: Literal["positive", "negative", "bookmark"]
+    original_query: str = ""
+    original_response: str = ""
+    correction: str = ""
+    conversation_id: str = ""
+    turn_index: int = -1
+    message_id: str = ""
 
 
 class ManifestEntry(BaseModel):
@@ -45,6 +57,7 @@ class ManifestEntry(BaseModel):
     tags: list[str] = []
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+    consolidated: bool = False
 
 
 class Manifest(BaseModel):

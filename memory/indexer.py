@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from datetime import datetime, timezone
@@ -94,10 +95,13 @@ class MemoryIndexer:
             keyword_score = overlap / len(keywords)
 
             days = max((now - entry.updated_at).total_seconds() / 86400, 0)
-            recency = 0.5 ** (days / 7)
+            recency = math.exp(-0.01 * days)
 
             type_w = _TYPE_WEIGHTS.get(entry.type, 1.0)
             score = keyword_score * recency * type_w
+
+            if getattr(entry, "consolidated", False):
+                score *= 0.3
             scored.append((score, entry))
 
         scored.sort(key=lambda x: x[0], reverse=True)

@@ -24,6 +24,7 @@ from tools.memory_tools import (
 from skills.registry import SkillRegistry
 from skills.loader import load_skills_from_github, install_builtins
 from tools.skill_tools import init_skill_tools, MANAGEMENT_TOOLS
+from tools.learning_tools import init_learning_tools, learning_server
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def _get_engine() -> MemoryEngine:
         config = load_config()
         _engine = MemoryEngine(config)
         init_memory_tools(config)
+        init_learning_tools(_engine)
     return _engine
 
 
@@ -110,7 +112,7 @@ async def run_query(
     skill_registry = _get_skill_registry()
     skill_server = skill_registry.get_server(MANAGEMENT_TOOLS)
 
-    mcp_servers = {"memory-tools": memory_server}
+    mcp_servers = {"memory-tools": memory_server, "learning-tools": learning_server}
     allowed_tools = [
         "Read", "Glob", "Grep", "Bash",
         "mcp__memory-tools__memory_search",
@@ -127,6 +129,9 @@ async def run_query(
         "mcp__skill-tools__skill_list",
         "mcp__skill-tools__skill_create",
         "mcp__skill-tools__skill_toggle",
+        # Learning tools
+        "mcp__learning-tools__record_feedback",
+        "mcp__learning-tools__consolidate_knowledge",
     ]
 
     if skill_server:

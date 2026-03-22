@@ -101,10 +101,16 @@ class GitHubStore:
 
     # --- Write (atomic multi-file commit) ---
 
-    def atomic_commit(self, files: dict[str, str], message: str) -> str:
+    def atomic_commit(
+        self,
+        files: dict[str, str],
+        message: str,
+        delete_paths: list[str] | None = None,
+    ) -> str:
         """Commit multiple files atomically using the Git Data API.
 
         *files* maps repo-relative paths to their string content.
+        *delete_paths* is an optional list of repo-relative paths to remove.
         Returns the new commit SHA.
         """
         repo = self._repo
@@ -117,6 +123,13 @@ class GitHubStore:
             InputGitTreeElement(path=path, mode="100644", type="blob", content=content)
             for path, content in files.items()
         ]
+
+        # To delete a file via the Git Data API, create a tree element with sha
+        # set to None — this removes the entry from the tree.
+        for path in delete_paths or []:
+            tree_elements.append(
+                InputGitTreeElement(path=path, mode="100644", type="blob", sha=None)
+            )
 
         new_tree = repo.create_git_tree(tree_elements, base_tree=base_tree)
         new_commit = repo.create_git_commit(message, new_tree, [parent_commit])
