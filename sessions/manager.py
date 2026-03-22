@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Literal
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ SessionKey = tuple[str, str, str]
 class Turn:
     """A single conversation turn."""
 
-    role: str  # "user" or "assistant"
+    role: Literal["user", "assistant"]
     content: str
     timestamp: float = field(default_factory=time.time)
 
@@ -42,7 +43,7 @@ class Session:
 
     def get_history(self, max_turns: int = 40) -> list[dict[str, str]]:
         """Return recent turns as list of {role, content} dicts."""
-        recent = self.turns[-max_turns:] if len(self.turns) > max_turns else self.turns
+        recent = self.turns[-max_turns:]
         return [{"role": t.role, "content": t.content} for t in recent]
 
     def is_expired(self, ttl_seconds: float) -> bool:

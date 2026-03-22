@@ -153,13 +153,11 @@ def main():
             for msg in discord_history:
                 session.add_turn(msg["role"], msg["content"])
 
+        # Build history for agent (before adding current message)
+        history = session.get_history()
+
         # Record current user message
         session.add_turn("user", user_text_or_fallback)
-
-        # Build history for agent (exclude last turn — it's the current message)
-        history = session.get_history()
-        if history and history[-1]["role"] == "user":
-            history = history[:-1]
 
         async with _semaphore:
             # Show typing indicator while processing
