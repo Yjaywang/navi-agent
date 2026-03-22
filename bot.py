@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+import os
 
 import io
 
@@ -10,6 +11,7 @@ import discord
 
 import agent
 from config import load_config
+from sessions.manager import SessionManager
 from utils.chunking import chunk_text
 
 # Max messages to fetch from thread history for conversation context
@@ -81,6 +83,9 @@ async def _build_history(
 
 def main():
     config = load_config()
+    session_manager = SessionManager(
+        ttl_minutes=int(os.environ.get("SESSION_TTL_MINUTES", "60"))
+    )
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -134,17 +139,36 @@ def main():
                 # Fallback to replying in the same channel
                 pass
 
-        # Build conversation history from thread/DM
-        history = await _build_history(response_channel, client.user)
+        # Session management
+        guild_id = str(message.guild.id) if message.guild else ""
+        channel_id = str(response_channel.id)
+        user_id = str(message.author.id)
+        user_text_or_fallback = user_text or "(user sent an attachment without text)"
+
+        session = session_manager.get_or_create(guild_id, channel_id, user_id)
+
+        # Bootstrap from Discord history if session is fresh (e.g. after bot restart)
+        if not session.turns:
+            discord_history = await _build_history(response_channel, client.user)
+            for msg in discord_history:
+                session.add_turn(msg["role"], msg["content"])
+
+        # Record current user message
+        session.add_turn("user", user_text_or_fallback)
+
+        # Build history for agent (exclude last turn — it's the current message)
+        history = session.get_history()
+        if history and history[-1]["role"] == "user":
+            history = history[:-1]
 
         async with _semaphore:
             # Show typing indicator while processing
             async with response_channel.typing():
                 try:
                     response_text, response_files = await agent.run_query(
-                        user_text or "(user sent an attachment without text)",
-                        user_id=str(message.author.id),
-                        guild_id=str(message.guild.id) if message.guild else "",
+                        user_text_or_fallback,
+                        user_id=user_id,
+                        guild_id=guild_id,
                         conversation_history=history,
                         attachments=attachments,
                     )
@@ -152,6 +176,9 @@ def main():
                     log.exception("Agent query failed")
                     response_text = f"Sorry, something went wrong: {e}"
                     response_files = []
+
+            # Record assistant response in session
+            session.add_turn("assistant", response_text)
 
             # Send response in chunks
             chunks = chunk_text(response_text)
@@ -166,6 +193,9 @@ def main():
                     await response_channel.send(part, files=discord_files)
                 else:
                     await response_channel.send(part)
+
+        # Opportunistic cleanup of expired sessions
+        session_manager.cleanup_expired()
 
     client.run(config.discord_token, log_handler=None)
 
