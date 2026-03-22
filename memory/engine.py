@@ -355,3 +355,34 @@ class MemoryEngine:
 
         log.info("Archived %d stale entries", len(to_archive))
         return len(to_archive)
+
+    # ------------------------------------------------------------------
+    # Forget
+    # ------------------------------------------------------------------
+
+    def forget_topic(self, topic: str, top_k: int = 10) -> int:
+        """Delete memories matching *topic* from manifest and GitHub.
+
+        Returns the number of entries removed.
+        """
+        entries = self.indexer.search(topic, top_k=top_k)
+        if not entries:
+            return 0
+
+        ids_to_remove = {e.id for e in entries}
+        paths_to_delete = [e.path for e in entries]
+
+        manifest = self.indexer.get_manifest(force_refresh=True)
+        manifest.entries = [e for e in manifest.entries if e.id not in ids_to_remove]
+        manifest.version += 1
+
+        self.store.atomic_commit(
+            {"_index/manifest.json": manifest.model_dump_json(indent=2)},
+            f"Forget memories about: {topic[:50]}",
+            delete_paths=paths_to_delete,
+        )
+        self.indexer._manifest = manifest
+        self.indexer._last_refresh = __import__("time").time()
+
+        log.info("Forgot %d entries about: %s", len(ids_to_remove), topic)
+        return len(ids_to_remove)

@@ -128,11 +128,22 @@ class SkillRegistry:
         log.info("Registered skill: %s (enabled=%s)", metadata.name, metadata.enabled)
 
     def unregister_skill(self, name: str) -> None:
-        """Remove a skill from the in-memory registry."""
-        if name in self._skills:
-            del self._skills[name]
-            self._server_cache = None
-            log.info("Unregistered skill: %s", name)
+        """Remove a skill from the in-memory registry and GitHub."""
+        if name not in self._skills:
+            return
+
+        del self._skills[name]
+        self._server_cache = None
+
+        # Persist removal to GitHub
+        try:
+            manifest, _ = read_registry(self._store)
+            manifest.skills = [s for s in manifest.skills if s.name != name]
+            manifest.version += 1
+            update_registry_on_github(self._store, manifest)
+            log.info("Unregistered skill: %s (persisted to GitHub)", name)
+        except Exception:
+            log.exception("Skill '%s' removed from memory but failed to persist to GitHub", name)
 
     # ------------------------------------------------------------------
     # Server construction

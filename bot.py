@@ -94,9 +94,7 @@ def main():
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    session_manager = SessionManager(
-        ttl_minutes=int(os.environ.get("SESSION_TTL_MINUTES", "60"))
-    )
+    session_manager = SessionManager(ttl_minutes=config.session_ttl_minutes)
     rate_limiter = RateLimiter()
     _start_time = time.monotonic()
 
@@ -194,22 +192,11 @@ def main():
         await interaction.response.defer(ephemeral=True)
         try:
             engine = agent._get_engine()
-            entries = engine.indexer.search(topic, top_k=10)
-            if not entries:
+            count = engine.forget_topic(topic)
+            if count == 0:
                 await interaction.followup.send(f"找不到與 `{topic}` 相關的記憶。")
-                return
-            ids_to_remove = {e.id for e in entries}
-            paths_to_delete = [e.path for e in entries]
-            manifest = engine.indexer.get_manifest(force_refresh=True)
-            manifest.entries = [e for e in manifest.entries if e.id not in ids_to_remove]
-            manifest.version += 1
-            engine.store.atomic_commit(
-                {"_index/manifest.json": manifest.model_dump_json(indent=2)},
-                f"Forget memories about: {topic[:50]}",
-                delete_paths=paths_to_delete,
-            )
-            engine.indexer._manifest = manifest
-            await interaction.followup.send(f"已遺忘 {len(ids_to_remove)} 條與 `{topic}` 相關的記憶。")
+            else:
+                await interaction.followup.send(f"已遺忘 {count} 條與 `{topic}` 相關的記憶。")
         except Exception:
             log.exception("Failed to forget memories about %s", topic)
             await interaction.followup.send("刪除記憶失敗。")
