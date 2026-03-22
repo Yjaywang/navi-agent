@@ -280,7 +280,7 @@ def main():
                 return
             # Extract metadata from code
             namespace: dict = {}
-            exec(compile(code, f"<skill:{name}>", "exec"), namespace)  # noqa: S102
+            exec(compile(code, f"<skill:{name}>", "exec"), {"__builtins__": {}}, namespace)  # noqa: S102
             metadata = SkillMetadata(
                 name=name,
                 description=namespace.get("SKILL_DESCRIPTION", ""),
@@ -370,6 +370,12 @@ def main():
             elif k == "preferred_language":
                 profile.preferred_language = value
             elif k == "notes":
+                if len(value) > 500:
+                    await interaction.followup.send("筆記內容過長，請限制在 500 字元以內。")
+                    return
+                if len(profile.notes) >= 20:
+                    await interaction.followup.send("筆記數量已達上限（20則）。")
+                    return
                 profile.notes.append(value)
             profile.last_seen = datetime.now(timezone.utc)
             engine.update_user_profile(profile)
@@ -396,9 +402,12 @@ def main():
         embed.add_field(
             name="Preferred Language", value=profile.preferred_language or "(未設定)",
         )
+        notes_text = "\n".join(profile.notes) if profile.notes else "(無)"
+        if len(notes_text) > 1024:
+            notes_text = notes_text[:1020] + "..."
         embed.add_field(
             name="Notes",
-            value="\n".join(profile.notes) if profile.notes else "(無)",
+            value=notes_text,
             inline=False,
         )
         embed.add_field(
