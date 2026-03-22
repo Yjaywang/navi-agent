@@ -166,7 +166,7 @@ async def run_query(
         model=config.model,
         system_prompt=system_prompt,
         mcp_servers=mcp_servers,
-        max_turns=15,
+        max_turns=config.max_turns,
     )
 
     # Build the full prompt with conversation history + attachment info
@@ -235,4 +235,11 @@ async def run_query(
     clear_response_files()
 
     text = "\n".join(parts) if parts else "（No response generated）"
+
+    # Suppress internal error details from reaching the user
+    _ERROR_MARKERS = ["invalid api key", "fix external api key", "authentication", "unauthorized"]
+    if any(marker in text.lower() for marker in _ERROR_MARKERS):
+        log.error("Agent returned an error response: %s", text[:200])
+        text = "抱歉，處理時發生了內部錯誤。請稍後再試。"
+
     return text, response_files
