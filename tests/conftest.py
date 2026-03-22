@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
+import discord
+
 import pytest
 
 from memory.github_store import GitHubStore
@@ -32,6 +34,7 @@ class _StubConfig:
     session_ttl_minutes: int = 60
     max_turns: int = 20
     agent_query_timeout: int = 120
+    health_check_port: int = 8080
     log_level: str = "DEBUG"
 
     def __post_init__(self):
@@ -73,3 +76,68 @@ def _default_get_file(path: str):
 @pytest.fixture
 def indexer(mock_store):
     return MemoryIndexer(mock_store)
+
+
+# ---------------------------------------------------------------------------
+# Discord mock helpers
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_bot_user():
+    user = MagicMock(spec=discord.User)
+    user.id = 12345
+    user.bot = False
+    return user
+
+
+def make_mock_message(
+    *,
+    author=None,
+    channel=None,
+    content="hello",
+    mentions=None,
+    bot=False,
+):
+    """Factory for creating mock discord.Message objects."""
+    msg = MagicMock(spec=discord.Message)
+    if author is None:
+        author = MagicMock(spec=discord.User)
+        author.bot = bot
+    msg.author = author
+    msg.channel = channel or MagicMock(spec=discord.TextChannel)
+    msg.content = content
+    msg.mentions = mentions or []
+    return msg
+
+
+class AsyncIteratorMock:
+    """Helper that wraps a list into an async iterator (for channel.history())."""
+
+    def __init__(self, items):
+        self._items = list(items)
+        self._index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._items):
+            raise StopAsyncIteration
+        item = self._items[self._index]
+        self._index += 1
+        return item
+
+
+# ---------------------------------------------------------------------------
+# Agent singleton reset
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def reset_agent_singletons():
+    """Reset agent module singletons before and after each test."""
+    import agent as _agent_mod
+    _agent_mod._engine = None
+    _agent_mod._skill_registry = None
+    yield
+    _agent_mod._engine = None
+    _agent_mod._skill_registry = None

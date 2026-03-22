@@ -447,13 +447,38 @@ def main():
 
     async def _graceful_shutdown():
         log.info("Shutting down gracefully...")
+        if _health_server is not None:
+            _health_server.close()
+            await _health_server.wait_closed()
         session_manager.cleanup_expired()
         rate_limiter.cleanup(max_age=0)
         await client.close()
 
+    # ── Health check server ────────────────────────────────────────
+    _health_server = None
+
+    async def _start_health_server():
+        nonlocal _health_server
+
+        async def _handle(reader, writer):
+            await reader.read(1024)
+            if client.is_ready():
+                resp = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"
+            else:
+                resp = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 9\r\n\r\nNot Ready"
+            writer.write(resp)
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        port = config.health_check_port
+        _health_server = await asyncio.start_server(_handle, "0.0.0.0", port)
+        log.info("Health check server listening on port %d", port)
+
     @client.event
     async def on_ready():
         await tree.sync()
+        await _start_health_server()
         log.info(f"Bot connected as {client.user} (id={client.user.id}), slash commands synced")
 
     @client.event
