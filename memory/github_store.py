@@ -40,6 +40,16 @@ class GitHubStore:
                 raise FileNotFoundError(f"{path} not found in {self._repo_full_name}") from exc
             raise
 
+    def get_binary_file(self, path: str) -> tuple[bytes, str]:
+        """Return (raw_bytes, sha) for a file in the repo."""
+        try:
+            contents = self._repo.get_contents(path)
+            return contents.decoded_content, contents.sha
+        except GithubException as exc:
+            if exc.status == 404:
+                raise FileNotFoundError(f"{path} not found in {self._repo_full_name}") from exc
+            raise
+
     def file_exists(self, path: str) -> bool:
         try:
             self._repo.get_contents(path)

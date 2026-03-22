@@ -18,6 +18,8 @@ from tools.memory_tools import (
     memory_server,
     set_pending_attachments,
     clear_pending_attachments,
+    get_response_files,
+    clear_response_files,
 )
 
 log = logging.getLogger(__name__)
@@ -48,8 +50,8 @@ async def run_query(
     guild_id: str = "",
     conversation_history: list[dict[str, str]] | None = None,
     attachments: dict[str, dict] | None = None,
-) -> str:
-    """Send a message to Claude and return the full text response."""
+) -> tuple[str, list[dict]]:
+    """Send a message to Claude and return (text_response, response_files)."""
     config = load_config()
     engine = _get_engine()
 
@@ -81,6 +83,9 @@ async def run_query(
             "mcp__memory-tools__memory_update_user_profile",
             "mcp__memory-tools__view_attached_image",
             "mcp__memory-tools__memory_store_image",
+            "mcp__memory-tools__view_attached_file",
+            "mcp__memory-tools__memory_store_file",
+            "mcp__memory-tools__memory_retrieve_file",
         ],
         permission_mode="bypassPermissions",
         model=config.model,
@@ -100,16 +105,30 @@ async def run_query(
         prompt_parts.append(f"<conversation_history>\n{history_text}\n</conversation_history>")
 
     if attachments:
-        att_lines = []
+        image_lines = []
+        file_lines = []
         for att_id, att_info in attachments.items():
-            att_lines.append(f"- attachment_id={att_id}, filename={att_info['filename']}, type={att_info['content_type']}")
-        prompt_parts.append(
-            "<attached_images>\n"
-            "The user attached the following image(s). "
-            "Use `view_attached_image` to see each image, then `memory_store_image` to save it.\n"
-            + "\n".join(att_lines)
-            + "\n</attached_images>"
-        )
+            line = f"- attachment_id={att_id}, filename={att_info['filename']}, type={att_info['content_type']}"
+            if att_info["content_type"].startswith("image/"):
+                image_lines.append(line)
+            else:
+                file_lines.append(line)
+        if image_lines:
+            prompt_parts.append(
+                "<attached_images>\n"
+                "The user attached the following image(s). "
+                "Use `view_attached_image` to see each image, then `memory_store_image` to save it.\n"
+                + "\n".join(image_lines)
+                + "\n</attached_images>"
+            )
+        if file_lines:
+            prompt_parts.append(
+                "<attached_files>\n"
+                "The user attached the following file(s). "
+                "Use `view_attached_file` to read each file, then `memory_store_file` to save it.\n"
+                + "\n".join(file_lines)
+                + "\n</attached_files>"
+            )
 
     prompt_parts.append(f"User's latest message: {user_message}")
     full_prompt = "\n\n".join(prompt_parts)
@@ -127,4 +146,8 @@ async def run_query(
     finally:
         clear_pending_attachments()
 
-    return "\n".join(parts) if parts else "（No response generated）"
+    response_files = get_response_files()
+    clear_response_files()
+
+    text = "\n".join(parts) if parts else "（No response generated）"
+    return text, response_files

@@ -16,8 +16,35 @@ from memory.models import ConversationMemory, FactMemory, UserProfile
 # Lazy-initialized engine (set via init_memory_tools)
 _engine: MemoryEngine | None = None
 
-# Temporary storage for image attachments (set per query by bot.py → agent.py)
+# Temporary storage for attachments (set per query by bot.py → agent.py)
 _pending_attachments: dict[str, dict] = {}
+
+# Files to send back to the user as Discord attachments (populated by memory_retrieve_file)
+_response_files: list[dict] = []
+
+# Extensions considered text-readable by the agent
+_TEXT_EXTENSIONS = {
+    ".txt", ".md", ".py", ".js", ".ts", ".json", ".xml", ".yaml", ".yml",
+    ".csv", ".html", ".css", ".sql", ".sh", ".toml", ".ini", ".cfg",
+    ".log", ".rst", ".go", ".rs", ".java", ".c", ".cpp", ".h",
+    ".rb", ".php", ".swift", ".kt", ".r", ".tex",
+}
+
+_TEXT_MIME_TYPES = {
+    "application/json", "application/xml", "application/javascript",
+    "application/x-yaml", "application/x-sh", "application/sql",
+    "application/toml",
+}
+
+
+def _is_text_file(filename: str, content_type: str) -> bool:
+    """Determine if a file is text-based (readable by the agent)."""
+    if content_type.startswith("text/"):
+        return True
+    if content_type in _TEXT_MIME_TYPES:
+        return True
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+    return ext in _TEXT_EXTENSIONS
 
 
 def init_memory_tools(config: Config) -> None:
@@ -35,6 +62,16 @@ def set_pending_attachments(attachments: dict[str, dict]) -> None:
 def clear_pending_attachments() -> None:
     global _pending_attachments
     _pending_attachments = {}
+
+
+def get_response_files() -> list[dict]:
+    """Return files queued for sending back to the user."""
+    return list(_response_files)
+
+
+def clear_response_files() -> None:
+    global _response_files
+    _response_files = []
 
 
 def _get_engine() -> MemoryEngine:
@@ -241,13 +278,127 @@ async def memory_store_image(args: dict[str, Any]) -> dict[str, Any]:
         id=image_id,
         source_user="agent",
         content=f"Image: {filename}\nPath: {image_path}\nDescription: {description}",
-        summary=f"Image: {description[:80]}",
-        tags=["image"] + tags,
+        summary=f"Image: {filename} - {description[:80]}",
+        tags=["image", filename] + tags,
         confidence=1.0,
     )
     fact_path = engine.store_fact(fact)
 
     return {"content": [{"type": "text", "text": f"Image stored at {image_path}, fact at {fact_path}"}]}
+
+
+@tool(
+    "view_attached_file",
+    "View a non-image file that the user attached. For text files, returns the file content. "
+    "For binary files (PDF, zip, etc.), returns metadata only. "
+    "The attachment_id is provided in the user's message.",
+    {"attachment_id": str},
+)
+async def view_attached_file(args: dict[str, Any]) -> dict[str, Any]:
+    attachment_id = args["attachment_id"]
+    attachment = _pending_attachments.get(attachment_id)
+    if not attachment:
+        return {"content": [{"type": "text", "text": f"No attachment found with id '{attachment_id}'."}]}
+
+    filename = attachment["filename"]
+    content_type = attachment["content_type"]
+    data: bytes = attachment["data"]
+    size = len(data)
+
+    if _is_text_file(filename, content_type):
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1")
+        max_chars = 100_000
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars]
+        header = f"File: {filename} ({content_type}, {size} bytes)"
+        if truncated:
+            header += f"\n[TRUNCATED: showing first {max_chars} of {size} characters]"
+        return {"content": [{"type": "text", "text": f"{header}\n\n--- File Content ---\n{text}"}]}
+    else:
+        return {"content": [{"type": "text", "text": (
+            f"File: {filename} ({content_type}, {size} bytes)\n"
+            "This is a binary file. Content cannot be displayed, but it can be stored "
+            "to memory with `memory_store_file`."
+        )}]}
+
+
+@tool(
+    "memory_store_file",
+    "Store a file attachment in the memory repo with a description. "
+    "Works for any file type (text, PDF, code, documents, etc.). "
+    "Call this AFTER viewing the file with view_attached_file.",
+    {"attachment_id": str, "description": str, "tags": str},
+)
+async def memory_store_file(args: dict[str, Any]) -> dict[str, Any]:
+    engine = _get_engine()
+    attachment_id = args["attachment_id"]
+    attachment = _pending_attachments.get(attachment_id)
+    if not attachment:
+        return {"content": [{"type": "text", "text": f"No attachment found with id '{attachment_id}'."}]}
+
+    description = args["description"]
+    tags = [t.strip() for t in args.get("tags", "").split(",") if t.strip()]
+    filename = attachment["filename"]
+    content_type = attachment["content_type"]
+    now = datetime.now(timezone.utc)
+
+    # Store the file
+    date_prefix = now.strftime("%Y/%m/%d")
+    file_id = uuid.uuid4().hex[:12]
+    ext = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
+    file_path = f"files/{date_prefix}/{file_id}.{ext}"
+
+    engine.store.store_binary_file(
+        file_path, attachment["data"], f"Store file {file_id}"
+    )
+
+    # Store a fact about the file
+    fact = FactMemory(
+        id=file_id,
+        source_user="agent",
+        content=f"File: {filename}\nType: {content_type}\nPath: {file_path}\nDescription: {description}",
+        summary=f"File: {filename} - {description[:80]}",
+        tags=["file", filename, ext, content_type.split("/")[0]] + tags,
+        confidence=1.0,
+    )
+    fact_path = engine.store_fact(fact)
+
+    return {"content": [{"type": "text", "text": f"File stored at {file_path}, fact at {fact_path}"}]}
+
+
+@tool(
+    "memory_retrieve_file",
+    "Retrieve a previously stored file or image from the memory repo and send it back to the user. "
+    "Provide the repo path (e.g. 'files/2026/03/22/abc123.csv' or 'images/2026/03/22/abc123.png'). "
+    "You can find the path by searching memory first with memory_search. "
+    "Use original_filename to restore the original file name (found in the fact content 'File:' field).",
+    {"file_path": str, "original_filename": str},
+)
+async def memory_retrieve_file(args: dict[str, Any]) -> dict[str, Any]:
+    engine = _get_engine()
+    file_path = args["file_path"]
+
+    try:
+        data, _ = engine.store.get_binary_file(file_path)
+    except FileNotFoundError:
+        return {"content": [{"type": "text", "text": f"File not found: {file_path}"}]}
+
+    # Use original filename if provided, otherwise fall back to repo path
+    filename = args.get("original_filename") or (file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path)
+
+    _response_files.append({
+        "filename": filename,
+        "data": data,
+    })
+
+    return {"content": [{"type": "text", "text": (
+        f"File retrieved: {filename} ({len(data)} bytes). "
+        "It will be sent as an attachment in the Discord message."
+    )}]}
 
 
 # Bundle into MCP server
@@ -261,5 +412,8 @@ memory_server = create_sdk_mcp_server(
         memory_update_user_profile,
         view_attached_image,
         memory_store_image,
+        view_attached_file,
+        memory_store_file,
+        memory_retrieve_file,
     ],
 )

@@ -4,6 +4,8 @@
 import asyncio
 import logging
 
+import io
+
 import discord
 
 import agent
@@ -95,10 +97,10 @@ def main():
 
         user_text = _clean_mention(message.content, client.user)
 
-        # Download image attachments
+        # Download attachments
         attachments: dict[str, dict] = {}
         for att in message.attachments:
-            if att.content_type and att.content_type.startswith("image/"):
+            if att.content_type:
                 try:
                     data = await att.read()
                     att_id = str(att.id)
@@ -139,8 +141,8 @@ def main():
             # Show typing indicator while processing
             async with response_channel.typing():
                 try:
-                    response_text = await agent.run_query(
-                        user_text or "(user sent an image without text)",
+                    response_text, response_files = await agent.run_query(
+                        user_text or "(user sent an attachment without text)",
                         user_id=str(message.author.id),
                         guild_id=str(message.guild.id) if message.guild else "",
                         conversation_history=history,
@@ -149,10 +151,21 @@ def main():
                 except Exception as e:
                     log.exception("Agent query failed")
                     response_text = f"Sorry, something went wrong: {e}"
+                    response_files = []
 
             # Send response in chunks
-            for part in chunk_text(response_text):
-                await response_channel.send(part)
+            chunks = chunk_text(response_text)
+            # Attach files to the last chunk
+            discord_files = [
+                discord.File(io.BytesIO(f["data"]), filename=f["filename"])
+                for f in response_files
+            ]
+            for i, part in enumerate(chunks):
+                is_last = i == len(chunks) - 1
+                if is_last and discord_files:
+                    await response_channel.send(part, files=discord_files)
+                else:
+                    await response_channel.send(part)
 
     client.run(config.discord_token, log_handler=None)
 
