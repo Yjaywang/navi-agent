@@ -78,10 +78,18 @@ def get_skill_registry() -> SkillRegistry:
 
 
 def _load_system_prompt(memory_context: str = "") -> str:
-    prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "system.md")
-    with open(prompt_path) as f:
+    base_dir = os.path.join(os.path.dirname(__file__), "prompts")
+    with open(os.path.join(base_dir, "system.md")) as f:
         template = f.read()
-    return template.replace("{memory_context}", memory_context)
+
+    if memory_context:
+        with open(os.path.join(base_dir, "memory_context.md")) as f:
+            ctx_template = f.read()
+        rendered_context = ctx_template.replace("{raw_context}", memory_context)
+    else:
+        rendered_context = ""
+
+    return template.replace("{memory_context}", rendered_context)
 
 
 async def run_query(
