@@ -19,7 +19,7 @@ from skills.base import (
 from skills.loader import (
     update_registry_on_github,
     validate_skill_code,
-    _read_registry,
+    read_registry,
 )
 
 log = logging.getLogger(__name__)
@@ -193,7 +193,7 @@ class SkillRegistry:
 
         # Persist to GitHub
         try:
-            manifest, _ = _read_registry(self._store)
+            manifest, _ = read_registry(self._store)
             for skill in manifest.skills:
                 if skill.name == name:
                     skill.enabled = enabled

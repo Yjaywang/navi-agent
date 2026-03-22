@@ -10,7 +10,7 @@ from typing import Any
 from claude_agent_sdk import tool
 
 from skills.base import SkillMetadata
-from skills.loader import save_skill_to_github, remove_skill_from_github, validate_skill_code
+from skills.loader import save_skill_to_github, validate_skill_code
 from skills.registry import SkillRegistry
 
 log = logging.getLogger(__name__)

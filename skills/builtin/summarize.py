@@ -8,7 +8,7 @@ SKILL_PARAMETERS = {"text": str, "max_points": int}
 
 async def execute(args):
     text = args["text"]
-    max_points = args.get("max_points", 5) or 5
+    max_points = args.get("max_points", 5)
     return {
         "content": [{
             "type": "text",

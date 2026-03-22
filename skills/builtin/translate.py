@@ -9,7 +9,7 @@ SKILL_PARAMETERS = {"text": str, "target_language": str, "source_language": str}
 async def execute(args):
     text = args["text"]
     target = args["target_language"]
-    source = args.get("source_language", "auto-detect") or "auto-detect"
+    source = args.get("source_language", "auto-detect")
     return {
         "content": [{
             "type": "text",

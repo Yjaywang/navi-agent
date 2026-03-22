@@ -99,7 +99,7 @@ def validate_skill_code(code: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _read_registry(store: GitHubStore) -> tuple[SkillRegistryManifest, str | None]:
+def read_registry(store: GitHubStore) -> tuple[SkillRegistryManifest, str | None]:
     """Read skills/registry.json. Returns (manifest, sha) or (empty manifest, None)."""
     try:
         content, sha = store.get_file(REGISTRY_PATH)
@@ -116,7 +116,7 @@ def load_skills_from_github(
 
     Returns list of (metadata, code) tuples.
     """
-    manifest, _ = _read_registry(store)
+    manifest, _ = read_registry(store)
     results: list[tuple[SkillMetadata, str]] = []
 
     for skill in manifest.skills:
@@ -141,7 +141,7 @@ def save_skill_to_github(
     code: str,
 ) -> None:
     """Save a skill file and update registry.json atomically."""
-    manifest, _ = _read_registry(store)
+    manifest, _ = read_registry(store)
 
     # Update or add entry
     existing_idx = next(
@@ -166,7 +166,7 @@ def save_skill_to_github(
 
 def remove_skill_from_github(store: GitHubStore, name: str) -> None:
     """Remove a skill entry from registry.json (leaves the file for history)."""
-    manifest, sha = _read_registry(store)
+    manifest, sha = read_registry(store)
 
     manifest.skills = [s for s in manifest.skills if s.name != name]
     manifest.version += 1
@@ -185,7 +185,7 @@ def update_registry_on_github(
     manifest: SkillRegistryManifest,
 ) -> None:
     """Write an updated manifest to skills/registry.json."""
-    _, sha = _read_registry(store)
+    _, sha = read_registry(store)
     store.create_or_update_file(
         REGISTRY_PATH,
         manifest.model_dump_json(indent=2),
@@ -206,7 +206,7 @@ def install_builtins(store: GitHubStore) -> list[tuple[SkillMetadata, str]]:
     """
     import importlib.resources as pkg_resources
 
-    manifest, _ = _read_registry(store)
+    manifest, _ = read_registry(store)
     existing_names = {s.name for s in manifest.skills}
 
     installed: list[tuple[SkillMetadata, str]] = []
