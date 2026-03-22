@@ -330,11 +330,13 @@ class MemoryEngine:
             return 0
 
         files_to_commit: dict[str, str] = {}
+        delete_paths: list[str] = []
         for entry in to_archive:
             try:
                 raw, _ = self.store.get_file(entry.path)
                 archive_path = f"_archive/{entry.path}"
                 files_to_commit[archive_path] = raw
+                delete_paths.append(entry.path)
             except FileNotFoundError:
                 continue
 
@@ -342,7 +344,11 @@ class MemoryEngine:
         manifest.version += 1
         files_to_commit["_index/manifest.json"] = manifest.model_dump_json(indent=2)
 
-        self.store.atomic_commit(files_to_commit, f"Archive {len(to_archive)} stale entries")
+        self.store.atomic_commit(
+            files_to_commit,
+            f"Archive {len(to_archive)} stale entries",
+            delete_paths=delete_paths,
+        )
         self.indexer._manifest = manifest
         self.indexer._last_refresh = __import__("time").time()
 

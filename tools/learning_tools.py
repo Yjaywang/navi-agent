@@ -82,13 +82,6 @@ async def consolidate_knowledge(args: dict[str, Any]) -> dict[str, Any]:
     if not groups:
         return {"content": [{"type": "text", "text": "No topics with 3+ facts found in the given date range."}]}
 
-    # Mark original facts as consolidated immediately
-    if result["entry_ids"]:
-        try:
-            engine.mark_consolidated(result["entry_ids"])
-        except Exception:
-            log.exception("Failed to mark entries as consolidated")
-
     output = {"topics": {}}
     for topic_name, facts in groups.items():
         output["topics"][topic_name] = {
@@ -98,17 +91,41 @@ async def consolidate_knowledge(args: dict[str, Any]) -> dict[str, Any]:
                 for f in facts
             ],
         }
+    output["entry_ids"] = result["entry_ids"]
     output["instruction"] = (
         "For each topic above, synthesize the facts into a coherent knowledge article in Markdown. "
         "Resolve contradictions (prefer newer facts). Then call memory_store_fact with the consolidated "
-        "article as content, tagged with the topic name and 'consolidated'."
+        "article as content, tagged with the topic name and 'consolidated'. "
+        "After successfully storing the consolidated article, call mark_facts_consolidated "
+        "with the entry_ids listed above to mark the original facts as consolidated."
     )
 
     return {"content": [{"type": "text", "text": json.dumps(output, ensure_ascii=False, indent=2)}]}
 
 
+@tool(
+    "mark_facts_consolidated",
+    "Mark original facts as consolidated after a knowledge article has been successfully stored. "
+    "Call this only after the consolidated article is saved via memory_store_fact.",
+    {"entry_ids": list},
+)
+async def mark_facts_consolidated(args: dict[str, Any]) -> dict[str, Any]:
+    engine = _get_engine()
+    entry_ids = args.get("entry_ids", [])
+    if not entry_ids:
+        return {"content": [{"type": "text", "text": "No entry_ids provided."}]}
+
+    try:
+        engine.mark_consolidated(entry_ids)
+    except Exception:
+        log.exception("Failed to mark entries as consolidated")
+        return {"content": [{"type": "text", "text": "Error: failed to mark entries as consolidated."}]}
+
+    return {"content": [{"type": "text", "text": f"Marked {len(entry_ids)} facts as consolidated."}]}
+
+
 # Bundle into MCP server
 learning_server = create_sdk_mcp_server(
     "learning-tools",
-    tools=[record_feedback, consolidate_knowledge],
+    tools=[record_feedback, consolidate_knowledge, mark_facts_consolidated],
 )
