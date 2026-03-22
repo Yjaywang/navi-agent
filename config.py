@@ -18,6 +18,7 @@ class Config:
     rate_limit_trusted: int
     session_ttl_minutes: int
     max_turns: int
+    agent_query_timeout: int
     log_level: str
 
 
@@ -71,5 +72,6 @@ def load_config() -> Config:
         rate_limit_everyone=_parse_int("RATE_LIMIT_EVERYONE", "20"),
         rate_limit_trusted=_parse_int("RATE_LIMIT_TRUSTED", "100"),
         max_turns=_parse_int("MAX_TURNS", "20"),
+        agent_query_timeout=_parse_int("AGENT_QUERY_TIMEOUT", "120"),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
     )

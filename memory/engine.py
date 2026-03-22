@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -111,7 +112,7 @@ class MemoryEngine:
 
         # Update local cache
         self.indexer._manifest = manifest
-        self.indexer._last_refresh = __import__("time").time()
+        self.indexer._last_refresh = time.time()
 
         log.info("Stored conversation %s at %s", memory.id[:8], file_path)
         return file_path
@@ -143,7 +144,7 @@ class MemoryEngine:
         )
 
         self.indexer._manifest = manifest
-        self.indexer._last_refresh = __import__("time").time()
+        self.indexer._last_refresh = time.time()
 
         log.info("Stored fact %s at %s", fact.id[:8], file_path)
         return file_path
@@ -202,7 +203,7 @@ class MemoryEngine:
         )
 
         self.indexer._manifest = manifest
-        self.indexer._last_refresh = __import__("time").time()
+        self.indexer._last_refresh = time.time()
 
         log.info("Stored feedback %s at %s", feedback.id[:8], file_path)
         return file_path
@@ -306,7 +307,7 @@ class MemoryEngine:
         if files_to_commit:
             self.store.atomic_commit(files_to_commit, "Mark facts as consolidated")
             self.indexer._manifest = manifest
-            self.indexer._last_refresh = __import__("time").time()
+            self.indexer._last_refresh = time.time()
 
         log.info("Marked %d entries as consolidated", len(id_set))
 
@@ -351,7 +352,7 @@ class MemoryEngine:
             delete_paths=delete_paths,
         )
         self.indexer._manifest = manifest
-        self.indexer._last_refresh = __import__("time").time()
+        self.indexer._last_refresh = time.time()
 
         log.info("Archived %d stale entries", len(to_archive))
         return len(to_archive)
@@ -382,7 +383,7 @@ class MemoryEngine:
             delete_paths=paths_to_delete,
         )
         self.indexer._manifest = manifest
-        self.indexer._last_refresh = __import__("time").time()
+        self.indexer._last_refresh = time.time()
 
         log.info("Forgot %d entries about: %s", len(ids_to_remove), topic)
         return len(ids_to_remove)

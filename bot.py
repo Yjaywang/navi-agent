@@ -140,7 +140,7 @@ def main():
             f"Confirm what you stored.\n\n{content}"
         )
         try:
-            async with asyncio.timeout(60):
+            async with asyncio.timeout(config.agent_query_timeout):
                 response_text, _ = await agent.run_query(
                     prompt, user_id=user_id,
                 )
@@ -157,7 +157,7 @@ def main():
     async def cmd_consolidate(interaction: discord.Interaction):
         await interaction.response.defer()
         try:
-            async with asyncio.timeout(120):
+            async with asyncio.timeout(config.agent_query_timeout):
                 response_text, _ = await agent.run_query(
                     "請進行知識整理 (consolidate knowledge)",
                     user_id=str(interaction.user.id),
@@ -319,7 +319,7 @@ def main():
             # Show typing indicator while processing
             async with response_channel.typing():
                 try:
-                    async with asyncio.timeout(120):
+                    async with asyncio.timeout(config.agent_query_timeout):
                         response_text, response_files = await agent.run_query(
                             user_text_or_fallback,
                             user_id=user_id,
