@@ -18,7 +18,7 @@ from sessions.manager import SessionManager
 from utils.chunking import chunk_text
 
 # Max messages to fetch from thread history for conversation context
-_MAX_HISTORY = 20
+_MAX_HISTORY = 10
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)

@@ -28,6 +28,10 @@ from tools.learning_tools import init_learning_tools, learning_server
 
 log = logging.getLogger(__name__)
 
+# Keywords for conditional tool loading
+_CONSOLIDATION_KEYWORDS = ["consolidat", "整理", "彙整", "歸納"]
+_FILE_RETRIEVE_KEYWORDS = ["retrieve", "get file", "download", "傳送", "下載", "檔案"]
+
 # Lazy singletons
 _engine: MemoryEngine | None = None
 _skill_registry: SkillRegistry | None = None
@@ -113,6 +117,8 @@ async def run_query(
     skill_server = skill_registry.get_server(MANAGEMENT_TOOLS)
 
     mcp_servers = {"memory-tools": memory_server, "learning-tools": learning_server}
+
+    # Core tools (always loaded)
     allowed_tools = [
         "Read", "Glob", "Grep", "Bash",
         "mcp__memory-tools__memory_search",
@@ -120,19 +126,33 @@ async def run_query(
         "mcp__memory-tools__memory_store_conversation",
         "mcp__memory-tools__memory_get_user_profile",
         "mcp__memory-tools__memory_update_user_profile",
-        "mcp__memory-tools__view_attached_image",
-        "mcp__memory-tools__memory_store_image",
-        "mcp__memory-tools__view_attached_file",
-        "mcp__memory-tools__memory_store_file",
-        "mcp__memory-tools__memory_retrieve_file",
-        # Skill management tools (always available)
+        "mcp__learning-tools__record_feedback",
+    ]
+
+    # Attachment tools (only when attachments are present)
+    if attachments:
+        allowed_tools.extend([
+            "mcp__memory-tools__view_attached_image",
+            "mcp__memory-tools__memory_store_image",
+            "mcp__memory-tools__view_attached_file",
+            "mcp__memory-tools__memory_store_file",
+        ])
+
+    # File retrieval tool (only when user asks for stored files)
+    msg_lower = user_message.lower()
+    if any(kw in msg_lower for kw in _FILE_RETRIEVE_KEYWORDS):
+        allowed_tools.append("mcp__memory-tools__memory_retrieve_file")
+
+    # Skill management tools (always available)
+    allowed_tools.extend([
         "mcp__skill-tools__skill_list",
         "mcp__skill-tools__skill_create",
         "mcp__skill-tools__skill_toggle",
-        # Learning tools
-        "mcp__learning-tools__record_feedback",
-        "mcp__learning-tools__consolidate_knowledge",
-    ]
+    ])
+
+    # Consolidation tool (only when explicitly requested)
+    if any(kw in msg_lower for kw in _CONSOLIDATION_KEYWORDS):
+        allowed_tools.append("mcp__learning-tools__consolidate_knowledge")
 
     if skill_server:
         mcp_servers["skill-tools"] = skill_server
@@ -153,8 +173,18 @@ async def run_query(
     prompt_parts: list[str] = []
 
     if conversation_history:
+        def _truncate(text: str, limit: int = 200) -> str:
+            if len(text) <= limit:
+                return text
+            truncated = text[:limit]
+            # Try to cut at last space to avoid mid-word truncation
+            last_space = truncated.rfind(" ")
+            if last_space > limit // 2:
+                truncated = truncated[:last_space]
+            return truncated + "…"
+
         history_text = "\n".join(
-            f"{'User' if m['role'] == 'user' else 'You'}: {m['content']}"
+            f"{'User' if m['role'] == 'user' else 'You'}: {_truncate(m['content'])}"
             for m in conversation_history
         )
         prompt_parts.append(f"<conversation_history>\n{history_text}\n</conversation_history>")
