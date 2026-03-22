@@ -21,11 +21,15 @@ from tools.memory_tools import (
     get_response_files,
     clear_response_files,
 )
+from skills.registry import SkillRegistry
+from skills.loader import load_skills_from_github, install_builtins
+from tools.skill_tools import init_skill_tools, MANAGEMENT_TOOLS
 
 log = logging.getLogger(__name__)
 
-# Lazy singleton
+# Lazy singletons
 _engine: MemoryEngine | None = None
+_skill_registry: SkillRegistry | None = None
 
 
 def _get_engine() -> MemoryEngine:
@@ -35,6 +39,36 @@ def _get_engine() -> MemoryEngine:
         _engine = MemoryEngine(config)
         init_memory_tools(config)
     return _engine
+
+
+def _get_skill_registry() -> SkillRegistry:
+    global _skill_registry
+    if _skill_registry is None:
+        engine = _get_engine()
+        _skill_registry = SkillRegistry(engine.store)
+
+        # Install builtin skills if not present on GitHub
+        try:
+            for metadata, code in install_builtins(engine.store):
+                try:
+                    _skill_registry.register_skill(metadata, code)
+                except Exception:
+                    log.exception("Failed to register builtin skill: %s", metadata.name)
+        except Exception:
+            log.exception("Failed to install builtin skills")
+
+        # Load all enabled skills from GitHub
+        try:
+            for metadata, code in load_skills_from_github(engine.store):
+                try:
+                    _skill_registry.register_skill(metadata, code)
+                except Exception:
+                    log.exception("Failed to load skill: %s", metadata.name)
+        except Exception:
+            log.exception("Failed to load skills from GitHub")
+
+        init_skill_tools(_skill_registry)
+    return _skill_registry
 
 
 def _load_system_prompt(memory_context: str = "") -> str:
@@ -72,25 +106,41 @@ async def run_query(
     system_prompt = _load_system_prompt(memory_context)
     log.debug("System prompt length: %d chars", len(system_prompt))
 
+    # Build skill system
+    skill_registry = _get_skill_registry()
+    skill_server = skill_registry.get_server(MANAGEMENT_TOOLS)
+
+    mcp_servers = {"memory-tools": memory_server}
+    allowed_tools = [
+        "Read", "Glob", "Grep", "Bash",
+        "mcp__memory-tools__memory_search",
+        "mcp__memory-tools__memory_store_fact",
+        "mcp__memory-tools__memory_store_conversation",
+        "mcp__memory-tools__memory_get_user_profile",
+        "mcp__memory-tools__memory_update_user_profile",
+        "mcp__memory-tools__view_attached_image",
+        "mcp__memory-tools__memory_store_image",
+        "mcp__memory-tools__view_attached_file",
+        "mcp__memory-tools__memory_store_file",
+        "mcp__memory-tools__memory_retrieve_file",
+        # Skill management tools (always available)
+        "mcp__skill-tools__skill_list",
+        "mcp__skill-tools__skill_create",
+        "mcp__skill-tools__skill_toggle",
+    ]
+
+    if skill_server:
+        mcp_servers["skill-tools"] = skill_server
+        # Add dynamically installed skill tool names
+        allowed_tools.extend(skill_registry.get_tool_names())
+
     options = ClaudeAgentOptions(
         cwd=os.getcwd(),
-        allowed_tools=[
-            "Read", "Glob", "Grep", "Bash",
-            "mcp__memory-tools__memory_search",
-            "mcp__memory-tools__memory_store_fact",
-            "mcp__memory-tools__memory_store_conversation",
-            "mcp__memory-tools__memory_get_user_profile",
-            "mcp__memory-tools__memory_update_user_profile",
-            "mcp__memory-tools__view_attached_image",
-            "mcp__memory-tools__memory_store_image",
-            "mcp__memory-tools__view_attached_file",
-            "mcp__memory-tools__memory_store_file",
-            "mcp__memory-tools__memory_retrieve_file",
-        ],
+        allowed_tools=allowed_tools,
         permission_mode="bypassPermissions",
         model=config.model,
         system_prompt=system_prompt,
-        mcp_servers={"memory-tools": memory_server},
+        mcp_servers=mcp_servers,
         max_turns=15,
     )
 
