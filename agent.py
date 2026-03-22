@@ -37,7 +37,7 @@ _engine: MemoryEngine | None = None
 _skill_registry: SkillRegistry | None = None
 
 
-def _get_engine() -> MemoryEngine:
+def get_engine() -> MemoryEngine:
     global _engine
     if _engine is None:
         config = load_config()
@@ -47,10 +47,10 @@ def _get_engine() -> MemoryEngine:
     return _engine
 
 
-def _get_skill_registry() -> SkillRegistry:
+def get_skill_registry() -> SkillRegistry:
     global _skill_registry
     if _skill_registry is None:
-        engine = _get_engine()
+        engine = get_engine()
         _skill_registry = SkillRegistry(engine.store)
 
         # Install builtin skills if not present on GitHub
@@ -93,7 +93,7 @@ async def run_query(
 ) -> tuple[str, list[dict]]:
     """Send a message to Claude and return (text_response, response_files)."""
     config = load_config()
-    engine = _get_engine()
+    engine = get_engine()
 
     # Set up pending attachments for image tools
     if attachments:
@@ -113,7 +113,7 @@ async def run_query(
     log.debug("System prompt length: %d chars", len(system_prompt))
 
     # Build skill system
-    skill_registry = _get_skill_registry()
+    skill_registry = get_skill_registry()
     skill_server = skill_registry.get_server(MANAGEMENT_TOOLS)
 
     mcp_servers = {"memory-tools": memory_server, "learning-tools": learning_server}
@@ -166,7 +166,7 @@ async def run_query(
         model=config.model,
         system_prompt=system_prompt,
         mcp_servers=mcp_servers,
-        max_turns=15,
+        max_turns=config.max_turns,
     )
 
     # Build the full prompt with conversation history + attachment info
@@ -235,4 +235,11 @@ async def run_query(
     clear_response_files()
 
     text = "\n".join(parts) if parts else "（No response generated）"
+
+    # Suppress internal error details from reaching the user
+    _ERROR_MARKERS = ["invalid api key", "fix external api key", "authentication", "unauthorized"]
+    if any(marker in text.lower() for marker in _ERROR_MARKERS):
+        log.error("Agent returned an error response: %s", text[:200])
+        text = "抱歉，處理時發生了內部錯誤。請稍後再試。"
+
     return text, response_files

@@ -12,6 +12,32 @@ class Config:
     github_token: str
     memory_repo_owner: str
     memory_repo_name: str
+    admin_role_ids: set[int]
+    trusted_role_ids: set[int]
+    rate_limit_everyone: int
+    rate_limit_trusted: int
+    session_ttl_minutes: int
+    max_turns: int
+    agent_query_timeout: int
+    log_level: str
+
+
+def _parse_int(env_var: str, default: str) -> int:
+    raw = os.environ.get(env_var, default)
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"{env_var} must be an integer, got: {raw!r}") from None
+
+
+def _parse_role_ids(env_var: str) -> set[int]:
+    raw = os.environ.get(env_var, "")
+    try:
+        return {int(x.strip()) for x in raw.split(",") if x.strip()}
+    except ValueError:
+        raise ValueError(
+            f"{env_var} must be comma-separated integer role IDs, got: {raw!r}"
+        ) from None
 
 
 def load_config() -> Config:
@@ -40,4 +66,12 @@ def load_config() -> Config:
         github_token=github_token,
         memory_repo_owner=memory_repo_owner,
         memory_repo_name=memory_repo_name,
+        admin_role_ids=_parse_role_ids("DISCORD_ADMIN_ROLE_IDS"),
+        trusted_role_ids=_parse_role_ids("DISCORD_TRUSTED_ROLE_IDS"),
+        session_ttl_minutes=_parse_int("SESSION_TTL_MINUTES", "60"),
+        rate_limit_everyone=_parse_int("RATE_LIMIT_EVERYONE", "20"),
+        rate_limit_trusted=_parse_int("RATE_LIMIT_TRUSTED", "100"),
+        max_turns=_parse_int("MAX_TURNS", "20"),
+        agent_query_timeout=_parse_int("AGENT_QUERY_TIMEOUT", "120"),
+        log_level=os.environ.get("LOG_LEVEL", "INFO"),
     )
