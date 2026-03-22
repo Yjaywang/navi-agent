@@ -48,14 +48,14 @@ class MemoryEngine:
                 lines.append(f"- Notes: {'; '.join(profile.notes)}")
             sections.append("### User Profile\n" + "\n".join(lines))
 
-        # 2. Relevant memories
-        results = self.indexer.search(user_message, top_k=5)
+        # 2. Relevant memories (limited to top 3, shorter snippets)
+        results = self.indexer.search(user_message, top_k=3)
         if results:
             items: list[str] = []
             for i, entry in enumerate(results, 1):
                 try:
                     content, _ = self.store.get_file(entry.path)
-                    snippet = content[:300].strip()
+                    snippet = content[:150].strip()
                 except FileNotFoundError:
                     snippet = "(content unavailable)"
                 date_str = entry.updated_at.strftime("%Y-%m-%d")
@@ -66,7 +66,7 @@ class MemoryEngine:
         feedbacks = self._get_feedback_for_query(user_message)
         if feedbacks:
             fb_items: list[str] = []
-            for fb in feedbacks[:3]:
+            for fb in feedbacks[:1]:
                 fb_items.append(
                     f"- Query: {fb['original_query'][:100]}\n"
                     f"  Issue: The user indicated this response was unhelpful.\n"

@@ -41,7 +41,7 @@ class Session:
         self.turns.append(Turn(role=role, content=content))
         self.last_active = time.time()
 
-    def get_history(self, max_turns: int = 40) -> list[dict[str, str]]:
+    def get_history(self, max_turns: int = 20) -> list[dict[str, str]]:
         """Return recent turns as list of {role, content} dicts."""
         recent = self.turns[-max_turns:]
         return [{"role": t.role, "content": t.content} for t in recent]

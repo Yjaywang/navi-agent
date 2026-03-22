@@ -113,6 +113,8 @@ async def run_query(
     skill_server = skill_registry.get_server(MANAGEMENT_TOOLS)
 
     mcp_servers = {"memory-tools": memory_server, "learning-tools": learning_server}
+
+    # Core tools (always loaded)
     allowed_tools = [
         "Read", "Glob", "Grep", "Bash",
         "mcp__memory-tools__memory_search",
@@ -120,19 +122,32 @@ async def run_query(
         "mcp__memory-tools__memory_store_conversation",
         "mcp__memory-tools__memory_get_user_profile",
         "mcp__memory-tools__memory_update_user_profile",
-        "mcp__memory-tools__view_attached_image",
-        "mcp__memory-tools__memory_store_image",
-        "mcp__memory-tools__view_attached_file",
-        "mcp__memory-tools__memory_store_file",
-        "mcp__memory-tools__memory_retrieve_file",
-        # Skill management tools (always available)
+        "mcp__learning-tools__record_feedback",
+    ]
+
+    # Attachment tools (only when attachments are present)
+    if attachments:
+        allowed_tools.extend([
+            "mcp__memory-tools__view_attached_image",
+            "mcp__memory-tools__memory_store_image",
+            "mcp__memory-tools__view_attached_file",
+            "mcp__memory-tools__memory_store_file",
+        ])
+
+    # File retrieval tool (needed when user asks for stored files)
+    allowed_tools.append("mcp__memory-tools__memory_retrieve_file")
+
+    # Skill management tools (always available)
+    allowed_tools.extend([
         "mcp__skill-tools__skill_list",
         "mcp__skill-tools__skill_create",
         "mcp__skill-tools__skill_toggle",
-        # Learning tools
-        "mcp__learning-tools__record_feedback",
-        "mcp__learning-tools__consolidate_knowledge",
-    ]
+    ])
+
+    # Consolidation tool (only when explicitly requested)
+    msg_lower = user_message.lower()
+    if any(kw in msg_lower for kw in ["consolidat", "整理", "彙整", "歸納"]):
+        allowed_tools.append("mcp__learning-tools__consolidate_knowledge")
 
     if skill_server:
         mcp_servers["skill-tools"] = skill_server
@@ -154,7 +169,7 @@ async def run_query(
 
     if conversation_history:
         history_text = "\n".join(
-            f"{'User' if m['role'] == 'user' else 'You'}: {m['content']}"
+            f"{'User' if m['role'] == 'user' else 'You'}: {m['content'][:200]}"
             for m in conversation_history
         )
         prompt_parts.append(f"<conversation_history>\n{history_text}\n</conversation_history>")
